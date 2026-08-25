@@ -1,0 +1,14 @@
+# 사용자별 상태 — 창 위치, 언어, 숨김 라벨 등. config.example.json이 견본이다.
+config.json
+
+# 중복 실행 방지 락 (자동 생성, 지워도 무방)
+.instance.lock
+
+__pycache__/
+*.py[cod]
+
+# 아티팩트 번들 (개인 작업물, 저장소 대상 아님)
+Claude 사용량 위젯.html
+
+# oh-my-claudecode 세션 상태 (로컬 도구 산출물)
+.omc/

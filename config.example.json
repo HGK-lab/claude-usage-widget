@@ -1,0 +1,11 @@
+{
+  "x": null,
+  "y": null,
+  "topmost": true,
+  "minimized": false,
+  "poll_interval": 180,
+  "automation_reserve_pct": 5,
+  "language": "en",
+  "hidden_labels": [],
+  "auto_refresh_token": true
+}
