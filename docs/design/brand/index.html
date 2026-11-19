@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Usage Widget, 테라코타 브랜드 시안</title>
+<meta name="description" content="Claude 사용량 위젯의 Dose 테마 시안: 기본, 경고, 오류, 접힘, 설정 상태.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Nunito:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="brand.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-ref" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+</svg>
+
+<main class="sheet">
+  <header class="sheet-head">
+    <div>
+      <h1>Claude 사용량 위젯, 테라코타 브랜드 시안</h1>
+      <p>칸은 시간, 위에 겹친 얇은 막대는 사용량. 막대가 어두운 칸보다 앞서면 빨리 쓰는 중입니다.</p>
+    </div>
+    <span class="theme-note">원래 브랜드: 테라코타 라인아트</span>
+  </header>
+
+  <div class="grid">
+    <section class="cell">
+      <h2>기본 카드</h2>
+      <div class="stage">
+        <div class="w ">
+          <div class="w-head">
+            <svg class="globe" viewBox="0 0 32 20" aria-hidden="true"><path class="br" d="M6 2.5c-2 1.5 0 4.5-1.5 7.5 1.5 3-.5 6 1.5 7.5M26 2.5c2 1.5 0 4.5 1.5 7.5-1.5 3 .5 6-1.5 7.5"/><circle class="gl" cx="16" cy="10" r="7"/><ellipse class="mer" cx="16" cy="10" rx="3.2" ry="7"/><path class="mer" d="M9.2 7.5h13.6M9.2 12.5h13.6M16 3v14"/></svg><span class="w-title">Claude 사용량</span>
+            <div class="w-ctrl">
+              <button class="icon-btn" aria-label="설정"><svg><use href="#i-gear"/></svg></button>
+              <button class="icon-btn" aria-label="접기"><svg><use href="#i-min"/></svg></button>
+              <button class="icon-btn" aria-label="새로고침"><svg><use href="#i-ref"/></svg></button>
+              <button class="icon-btn" aria-label="닫기"><svg><use href="#i-x"/></svg></button>
+            </div>
+          </div>
+          <div class="lim lim--session">
+            <div class="lim-top"><span class="lim-name">세션 (5시간)</span><span class="pct">20%</span></div>
+            <div class="tl"><i class="now" style="--p:40%"></i><i></i><i></i><i></i><i></i><span class="use"><b style="width:20%"></b></span><span class="reserve" style="left:90%"></span></div><div class="when"><span>4시간 36분 뒤 리셋</span><span>오전 2:40</span></div>
+          </div><div class="lim ">
+            <div class="lim-top"><span class="lim-name">주간 (전체)</span><span class="pct">37%</span></div>
+            <div class="tl tl--week"><i class="past"><span>금</span></i><i class="past"><span>토</span></i><i class="past"><span>일</span></i><i class="now" style="--p:83%"><span>월</span></i><i><span>화</span></i><i><span>수</span></i><i><span>목</span></i><span class="use"><b style="width:37%"></b></span></div><div class="when"><span>3일 4시간 뒤 리셋</span><span>8/28 금 오후 6시</span></div><div class="label"><span>남은 3일</span><span class="stamp">하루 21%까지</span></div>
+          </div><div class="foot">방금 갱신, 3분마다</div>
+        </div>
+      </div>
+      <p>칸은 지난 시간만큼 어두워지고 테두리 칸이 지금입니다. 세션 20%는 시간보다 앞서고, 주간 37%는 시간보다 뒤처져 있습니다.</p>
+    </section>
+
+    <section class="cell">
+      <h2>70% 넘음, 모델별 한도</h2>
+      <div class="stage">
+        <div class="w is-high">
+          <div class="w-head">
+            <svg class="globe" viewBox="0 0 32 20" aria-hidden="true"><path class="br" d="M6 2.5c-2 1.5 0 4.5-1.5 7.5 1.5 3-.5 6 1.5 7.5M26 2.5c2 1.5 0 4.5 1.5 7.5-1.5 3 .5 6-1.5 7.5"/><circle class="gl" cx="16" cy="10" r="7"/><ellipse class="mer" cx="16" cy="10" rx="3.2" ry="7"/><path class="mer" d="M9.2 7.5h13.6M9.2 12.5h13.6M16 3v14"/></svg><span class="w-title">Claude 사용량</span>
+            <div class="w-ctrl">
+              <button class="icon-btn" aria-label="설정"><svg><use href="#i-gear"/></svg></button>
+              <button class="icon-btn" aria-label="접기"><svg><use href="#i-min"/></svg></button>
+              <button class="icon-btn" aria-label="새로고침"><svg><use href="#i-ref"/></svg></button>
+              <button class="icon-btn" aria-label="닫기"><svg><use href="#i-x"/></svg></button>
+            </div>
+          </div>
+          <div class="lim lim--session">
+            <div class="lim-top"><span class="lim-name">세션 (5시간)</span><span class="flag">70% 넘음</span><span class="pct">76%</span></div>
+            <div class="tl"><i class="past"></i><i class="past"></i><i class="past"></i><i class="now" style="--p:13%"></i><i></i><span class="use"><b style="width:76%"></b></span><span class="reserve" style="left:90%"></span></div><div class="when"><span>1시간 52분 뒤 리셋</span><span>오후 4:20</span></div>
+          </div><div class="lim ">
+            <div class="lim-top"><span class="lim-name">주간 (전체)</span><span class="pct">58%</span></div>
+            <div class="tl tl--week"><i class="past"><span>금</span></i><i class="past"><span>토</span></i><i class="past"><span>일</span></i><i class="past"><span>월</span></i><i class="now" style="--p:87%"><span>화</span></i><i><span>수</span></i><i><span>목</span></i><span class="use"><b style="width:58%"></b></span></div><div class="when"><span>2일 3시간 뒤 리셋</span><span>8/28 금 오후 6시</span></div>
+          </div><div class="lim ">
+            <div class="lim-top"><span class="lim-name">Opus 주간</span><span class="pct">41%</span></div>
+            <div class="bar-only"><span class="use"><b style="width:41%"></b></span></div>
+          </div><div class="foot">1분 전 갱신, 3분마다</div>
+        </div>
+      </div>
+      <p>70%를 넘으면 숫자 옆에 라벨이 붙고 막대가 앰버 브라운이 됩니다.</p>
+    </section>
+
+    <section class="cell">
+      <h2>90% 넘음, 자동화 예약 침범</h2>
+      <div class="stage">
+        <div class="w is-limit">
+          <div class="w-head">
+            <svg class="globe" viewBox="0 0 32 20" aria-hidden="true"><path class="br" d="M6 2.5c-2 1.5 0 4.5-1.5 7.5 1.5 3-.5 6 1.5 7.5M26 2.5c2 1.5 0 4.5 1.5 7.5-1.5 3 .5 6-1.5 7.5"/><circle class="gl" cx="16" cy="10" r="7"/><ellipse class="mer" cx="16" cy="10" rx="3.2" ry="7"/><path class="mer" d="M9.2 7.5h13.6M9.2 12.5h13.6M16 3v14"/></svg><span class="w-title">Claude 사용량</span>
+            <div class="w-ctrl">
+              <button class="icon-btn" aria-label="설정"><svg><use href="#i-gear"/></svg></button>
+              <button class="icon-btn" aria-label="접기"><svg><use href="#i-min"/></svg></button>
+              <button class="icon-btn" aria-label="새로고침"><svg><use href="#i-ref"/></svg></button>
+              <button class="icon-btn" aria-label="닫기"><svg><use href="#i-x"/></svg></button>
+            </div>
+          </div>
+          <div class="lim lim--session">
+            <div class="lim-top"><span class="lim-name">세션 (5시간)</span><span class="flag">예약분 침범</span><span class="pct">93%</span></div>
+            <div class="tl"><i class="past"></i><i class="past"></i><i class="past"></i><i class="past"></i><i class="now" style="--p:24%"></i><span class="use"><b style="width:93%"></b></span><span class="reserve" style="left:90%"></span></div><div class="when"><span>48분 뒤 리셋</span><span>오후 3:10</span></div>
+          </div><div class="lim ">
+            <div class="lim-top"><span class="lim-name">주간 (전체)</span><span class="pct">78%</span></div>
+            <div class="tl tl--week"><i class="past"><span>금</span></i><i class="past"><span>토</span></i><i class="past"><span>일</span></i><i class="past"><span>월</span></i><i class="past"><span>화</span></i><i class="now" style="--p:85%"><span>수</span></i><i><span>목</span></i><span class="use"><b style="width:78%"></b></span></div><div class="when"><span>1일 2시간 뒤 리셋</span><span>8/28 금 오후 6시</span></div>
+          </div><div class="foot">자동화 2개 몫 10%까지 침범</div>
+        </div>
+      </div>
+      <p>90% 또는 예약선을 넘으면 딥 레드브라운. 구조는 기본 카드와 같습니다.</p>
+    </section>
+
+    <section class="cell">
+      <h2>설정 패널</h2>
+      <div class="stage" style="zoom:1.05">
+        <div class="set" role="dialog" aria-labelledby="set-title">
+          <div class="set-head"><h3 id="set-title">설정</h3><button class="icon-btn" aria-label="닫기"><svg><use href="#i-x"/></svg></button></div>
+          <div class="grp"><h4>표시</h4>
+            <div class="row">언어<span class="keys"><button class="key" aria-pressed="false">English</button><button class="key" aria-pressed="true">한국어</button></span></div>
+            <div class="row">테마<span class="keys"><button class="key" aria-pressed="true">테라코타</button><button class="key" aria-pressed="false">Soot</button><button class="key" aria-pressed="false">Dose</button></span></div>
+            <div class="row">접었을 때<span class="keys"><button class="key" aria-pressed="true">칸</button><button class="key" aria-pressed="false">숫자</button></span></div>
+          </div>
+          <div class="grp"><h4>보일 한도</h4>
+            <div class="chips"><button class="chip" aria-pressed="true">세션</button><button class="chip" aria-pressed="true">주간</button><button class="chip" aria-pressed="true">Opus 주간</button><button class="chip" aria-pressed="false">Fable 주간</button></div>
+          </div>
+          <div class="grp"><h4>동작</h4>
+            <div class="row">항상 위<button class="sw" role="switch" aria-checked="true" aria-label="항상 위"></button></div>
+            <div class="row">Windows 시작 시 실행<button class="sw" role="switch" aria-checked="false" aria-label="Windows 시작 시 실행"></button></div>
+            <div class="row"><span>자동화 1개당 예약<small>scheduled-tasks에서 2개 찾음</small></span><input class="num" value="5%" aria-label="자동화 1개당 예약 퍼센트"></div>
+            <div class="row"><span>갱신 간격<small>3분보다 짧게는 안 됩니다</small></span><input class="num" value="3분" aria-label="갱신 간격"></div>
+            <div class="row"><span>토큰 자동 재발급<small>credentials.json에 씁니다</small></span><button class="sw" role="switch" aria-checked="true" aria-label="토큰 자동 재발급"></button></div>
+          </div>
+          <div class="set-foot"><button class="btn">취소</button><button class="btn btn--primary">저장</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cell">
+      <h2>오류, 접힌 알약</h2>
+      <div class="stage">
+        <div class="w is-stale">
+          <div class="w-head">
+            <svg class="globe" viewBox="0 0 32 20" aria-hidden="true"><path class="br" d="M6 2.5c-2 1.5 0 4.5-1.5 7.5 1.5 3-.5 6 1.5 7.5M26 2.5c2 1.5 0 4.5 1.5 7.5-1.5 3 .5 6-1.5 7.5"/><circle class="gl" cx="16" cy="10" r="7"/><ellipse class="mer" cx="16" cy="10" rx="3.2" ry="7"/><path class="mer" d="M9.2 7.5h13.6M9.2 12.5h13.6M16 3v14"/></svg><span class="w-title">Claude 사용량</span>
+            <div class="w-ctrl">
+              <button class="icon-btn" aria-label="설정"><svg><use href="#i-gear"/></svg></button>
+              <button class="icon-btn" aria-label="접기"><svg><use href="#i-min"/></svg></button>
+              <button class="icon-btn" aria-label="새로고침"><svg><use href="#i-ref"/></svg></button>
+              <button class="icon-btn" aria-label="닫기"><svg><use href="#i-x"/></svg></button>
+            </div>
+          </div>
+          <div class="lim lim--session">
+            <div class="lim-top"><span class="lim-name">세션 (5시간)</span><span class="pct">20%</span></div>
+            <div class="tl"><i class="now" style="--p:40%"></i><i></i><i></i><i></i><i></i><span class="use"><b style="width:20%"></b></span></div>
+          </div><div class="label"><span>마지막 값 12분 전</span><span class="stamp grey">갱신 못 함</span></div><div class="foot">토큰 만료. Claude Code를 실행하세요</div>
+        </div>
+      </div>
+      <div class="stage" style="padding-top:var(--space-sm)">
+        <div class="pill" role="button" tabindex="0" aria-label="펼치기">
+          <span class="pill-tl" aria-hidden="true"><i class="past"></i><i></i><i></i><i></i><i></i><span class="use"><b style="width:20%"></b></span></span>
+          <span><span class="pct">20%</span><small>주간 37%</small></span>
+        </div>
+      </div>
+      <p>오류 때는 마지막 값을 흐리게 남기고 회색 도장을 찍습니다. 알약도 같은 시간 칸과 막대.</p>
+    </section>
+
+    <section class="cell">
+      <h2>추가 기능 후보</h2>
+      <div class="ideas">
+        <div class="idea"><h3>주간 하루 예산</h3><p>남은 주간 %를 남은 날수로 나눠 라벨에 찍습니다. API 호출은 늘지 않습니다.</p></div>
+        <div class="idea"><h3>시간 칸 위 사용량 막대</h3><p>막대 끝과 어두운 칸 끝을 비교하면 속도가 보입니다.</p></div>
+        <div class="idea"><h3>분 단위 리셋 카운트다운</h3><p>폴링과 별도인 1분 타이머라 429와 무관합니다.</p></div>
+        <div class="idea"><h3>오류 때 낡은 값 흐림</h3><p>마지막 성공값과 경과 시간을 함께 보여 줍니다.</p></div>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>
