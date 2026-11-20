@@ -1,6 +1,10 @@
 # 사용자별 상태 — 창 위치, 언어, 숨김 라벨 등. config.example.json이 견본이다.
 config.json
 
+# 요일별 사용량 그래프용 주간 % 기록 (사용자별, 자동 생성)
+usage_history.json
+usage_history.json.tmp
+
 # 중복 실행 방지 락 (자동 생성, 지워도 무방)
 .instance.lock
 

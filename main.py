@@ -18,6 +18,7 @@ import tkinter.font as tkfont
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import history
 import i18n
 import theme
 import usage_api
@@ -25,6 +26,7 @@ import usage_api
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
 LOCK_PATH = APP_DIR / ".instance.lock"
+HISTORY_PATH = APP_DIR / "usage_history.json"   # 요일별 사용량용 주간 % 기록
 STARTUP_BAT = (
     Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows"
     / "Start Menu" / "Programs" / "Startup" / "ClaudeUsageWidget.bat"
@@ -54,12 +56,14 @@ ERROR_KEYS = {
 # str(e)를 화면에 그대로 쓰지 않는다.
 UNEXPECTED_ERROR_KEY = "error.unexpected"
 
-# 한도 종류별 창 길이와 시간 칸 수. 여기 없는 종류(모델별 주간 등)는 칸 없이
-# 얇은 막대만 그린다 — 모델별 한도는 개수·이름이 동적이라 칸을 늘리지 않는다.
+# 한도 종류별 창 길이. 막대 바탕의 '흐른 시간' 음영에 쓴다. 여기 없는 종류(모델별
+# 주간 등)는 음영 없이 사용량만 그린다 — 모델별 한도는 개수·이름이 동적이다.
 WINDOW_LEN = {"session": timedelta(hours=5), "weekly_all": timedelta(days=7)}
-SLOT_COUNT = {"session": 5, "weekly_all": 7}
 # 구식 응답(_parse_legacy)의 id → limits 배열의 kind
 LEGACY_KIND = {"five_hour": "session", "seven_day": "weekly_all"}
+# hidden_labels에서 이름 대신 한도 종류로 숨기는 토큰의 머리말("kind:session").
+# 세션·주간 전체처럼 모델명이 없는 한도는 이름이 언어마다 달라 이것으로 저장한다.
+KIND_TOKEN = "kind:"
 
 
 def limit_kind(item_id: str) -> str:
@@ -126,17 +130,6 @@ def slot_labels(kind: str, resets_at):
     start = resets_at.astimezone() - WINDOW_LEN["weekly_all"]
     names = i18n.weekdays()
     return [names[(start + timedelta(days=i)).weekday()] for i in range(7)]
-
-
-def daily_budget(pct: float, resets_at):
-    """(남은 일수, 하루 %). 하루 미만 남았거나 다 썼으면 None."""
-    if resets_at is None or pct >= 100:
-        return None
-    local = resets_at.astimezone()
-    days = (local - datetime.now(local.tzinfo)).total_seconds() / 86400
-    if days < 1:
-        return None
-    return int(days), int((100 - pct) / days)
 
 
 def _coerce_int(cfg, key, lo, hi=None):
@@ -235,11 +228,18 @@ class Widget:
         self.limits = None              # 마지막으로 성공한 응답(오류 때도 흐리게 남긴다)
         self.automations = 0
         self.minimized = bool(self.cfg["minimized"])
-        self.err_key = None             # 상태줄에 띄울 오류 i18n 키
+        self.err_key = None             # 상태줄에 띄울 오류 i18n 키 (폴링 오류만 — 값이 낡았다는 뜻)
+        self.local_msg = None           # 폴링과 무관한 로컬 오류 i18n 키(시작 프로그램 등록 실패 등)
         self._refreshing = False
+        self._redraw_pending = False    # 드래그 중 도착한 결과 — 놓을 때 다시 그린다
         self._sx = self._sy = None      # 드래그 시작 좌표 (None = 드래그 중 아님)
         self._drag_ox = self._drag_oy = 0
         self._pressed = None            # 눌린 버튼 이름 (떼는 순간 같은 버튼이면 실행)
+        self._draft = None              # 설정 패널이 열려 있으면 편집 중인 값(dict)
+        self.history = history.load(HISTORY_PATH)   # [(epoch, 주간 누적%)]
+        self._spin = 0.0                # 새로고침 아이콘 회전 각도
+        self._spin_until = 0.0          # 이 시각까지는 갱신이 끝나도 계속 돈다(최소 한 바퀴)
+        self._spinning = False
 
         self.root = tk.Tk()
         self.root.withdraw()
@@ -286,6 +286,7 @@ class Widget:
         self.autostart_var = tk.BooleanVar(value=STARTUP_BAT.exists())
         self.dark_var = tk.BooleanVar(value=self.cfg["theme"] == "dark")
         menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label=i18n.t("menu.settings"), command=self.open_settings)
         menu.add_command(label=i18n.t("menu.refresh"), command=self.manual_refresh)
         menu.add_command(label=i18n.t("menu.minimize"), command=self.toggle_minimize)
         menu.add_checkbutton(label=i18n.t("menu.topmost"), variable=self.topmost_var,
@@ -332,10 +333,18 @@ class Widget:
     def _reserve(self):
         return min(self.automations * self.cfg["automation_reserve_pct"], 80)
 
+    @staticmethod
+    def _hides(token, label, item_id):
+        """숨김 문자열 하나가 이 한도를 가리는지. "kind:session"처럼 종류 토큰이면
+        id로, 아니면 이름(소문자)에 들어 있는지로 본다."""
+        if token.startswith(KIND_TOKEN):
+            return token[len(KIND_TOKEN):] == limit_kind(item_id)
+        return token in label.lower()
+
     def _visible(self):
         hidden = self.cfg["hidden_labels"]
         return [it for it in (self.limits or [])
-                if not any(h in it["label"].lower() for h in hidden)]
+                if not any(self._hides(h, it["label"], it["id"]) for h in hidden)]
 
     def _reserve_warn(self):
         """세션이 자동화 예약선을 넘었으면 (개수, 예약%)."""
@@ -365,14 +374,25 @@ class Widget:
         c.delete("all")
         self._hovered = None
         P = self._palette()
-        if self.minimized:
+        if self._draft is not None:
+            w, h = self._draw_settings(P)
+        elif self.minimized:
             w, h = self._draw_pill(P)
         else:
             w, h = self._draw_card(P)
         c.configure(width=w, height=h)
         self.root.update_idletasks()
         x, y = self.root.winfo_x(), self.root.winfo_y()
+        # 설정 패널은 카드보다 넓고 길다. 화면 밖으로 나가면 저장 단추를 못 누르므로
+        # 오른쪽·아래 끝에 맞춰 당긴다(_place_window와 같이 주 모니터 기준).
+        x = max(0, min(x, self.root.winfo_screenwidth() - w))
+        y = max(0, min(y, self.root.winfo_screenheight() - h))
         self.root.geometry(f"{w}x{h}+{x}+{y}")
+        self._redraw_pending = False
+        # 다시 그리면 버튼이 사라지거나 옮겨 간다. 손 모양 커서가 남지 않게
+        # 지금 포인터 아래 항목으로 다시 맞춘다(_hovered는 위에서 None으로 비웠다).
+        c.configure(cursor="")
+        self._set_hover(self._btn_at())
 
     def _draw_card(self, P):
         c, f = self.canvas, self.f
@@ -387,7 +407,9 @@ class Widget:
                       font=f["title"], fill=P["ink"])
         bx = x1 - 10
         for name in ("close", "refresh", "min", "menu"):
-            self._icon(name, bx, cy, P)
+            self._icon(name, bx, cy, P, angle=self._spin if name == "refresh" else 0.0)
+            if name == "refresh":
+                self._refresh_xy = (bx, cy)
             bx -= 26
         y += head_h + 4
 
@@ -425,15 +447,30 @@ class Widget:
         c.tag_lower(bg)
         return W, int(y)
 
-    def _icon(self, name, cx, cy, P):
-        """아이콘 버튼. 투명한 히트 영역 + 선 아이콘, 둘 다 btn:<name> 태그."""
+    def _icon(self, name, cx, cy, P, name_as=None, angle=0.0):
+        """아이콘 버튼. 투명한 히트 영역 + 선 아이콘, 둘 다 btn:<name> 태그.
+
+        name은 그릴 모양, name_as는 눌렀을 때의 동작 이름(기본은 name과 같다).
+        angle(도)만큼 시계 방향으로 돌려 그린다 — 새로고침 회전 애니메이션용.
+        """
         c = self.canvas
-        tags = ("btn", f"btn:{name}")
-        itags = tags + (f"icon:{name}",)
+        act = name_as or name
+        tags = ("btn", f"btn:{act}")
+        itags = tags + (f"icon:{act}",)
         c.create_rectangle(cx - 12, cy - 12, cx + 12, cy + 12, fill=P["card"],
                            outline="", tags=tags)
-        col = P["muted"]
+        self._icon_lines(name, cx, cy, P["muted"], itags, angle)
+
+    def _icon_lines(self, name, cx, cy, col, itags, angle=0.0):
+        c = self.canvas
         kw = dict(fill=col, width=1.6, capstyle="round", tags=itags)
+        rot = math.radians(angle)
+
+        def at(r, deg):
+            """중심에서 반지름 r, 각도 deg(시계 방향, 0 = 오른쪽)인 점."""
+            a = math.radians(deg) + rot
+            return cx + r * math.cos(a), cy + r * math.sin(a)
+
         if name == "close":
             c.create_line(cx - 4, cy - 4, cx + 4, cy + 4, **kw)
             c.create_line(cx + 4, cy - 4, cx - 4, cy + 4, **kw)
@@ -443,16 +480,21 @@ class Widget:
             # 원호는 create_arc 대신 smooth 선으로 근사한다. arc는 색이 fill이 아니라
             # outline이라 icon:<name> 태그 하나로 호버 색을 한 번에 바꿀 수 없다.
             pts = []
-            for deg in range(40, 330, 25):
-                rad = math.radians(deg)
-                pts += [cx + 5 * math.cos(rad), cy - 5 * math.sin(rad)]
+            for deg in range(30, 321, 25):
+                pts += at(5, deg)
             c.create_line(*pts, smooth=True, **kw)
-            ex, ey = cx + 5 * math.cos(math.radians(40)), cy - 5 * math.sin(math.radians(40))
-            c.create_line(ex, ey - 4, ex, ey, ex - 4, ey, **kw)
+            ex, ey = at(5, 320)
+            # 화살촉: 호 끝에서 접선 방향으로 짧은 두 선
+            c.create_line(*at(5, 320), *at(8.5, 300), **kw)
+            c.create_line(ex, ey, *at(2.2, 290), **kw)
         elif name == "menu":
-            # 설정 패널은 아직 없다 — 같은 자리에서 우클릭 메뉴를 연다.
-            for dy in (-4, 0, 4):
-                c.create_line(cx - 5, cy + dy, cx + 5, cy + dy, **kw)
+            # 톱니바퀴: 테 + 이 8개. 테도 선으로 그려야 호버 때 fill로 한 번에 바뀐다.
+            ring = []
+            for deg in range(0, 361, 30):
+                ring += at(3.6, deg)
+            c.create_line(*ring, smooth=True, **kw)
+            for deg in range(0, 360, 45):
+                c.create_line(*at(5.2, deg), *at(7, deg), **dict(kw, width=2.2))
 
     def _draw_limit(self, item, x0, x1, y, P):
         c, f = self.canvas, self.f
@@ -480,15 +522,11 @@ class Widget:
         y += top_h + 4
 
         bar = P["high"] if pct >= 70 else P["accent"]
-        progress = time_progress(kind, item["resets_at"])
-        if progress is not None:
-            y = self._timeline(x0, x1, y, SLOT_COUNT[kind], progress,
-                               slot_labels(kind, item["resets_at"]),
-                               pct, bar, reserve, P)
+        if kind == "weekly_all" and item["resets_at"] is not None:
+            y = self._daily_graph(x0, x1, y + 2, item, P)
         else:
-            _round_rect(c, x0, y, x1, y + theme.USE_H, 2, fill=P["slot"], outline="")
-            self._use_bar(x0, x1, y, pct, bar, P)
-            y += theme.USE_H
+            y = self._bar(x0, x1, y + 2, pct, bar,
+                          time_progress(kind, item["resets_at"]), reserve, P)
 
         left, right = format_reset(item["resets_at"])
         if left or right:
@@ -496,56 +534,79 @@ class Widget:
             c.create_text(x0, y, text=left, anchor="nw", font=f["small"], fill=P["muted"])
             c.create_text(x1, y, text=right, anchor="ne", font=f["small"], fill=P["muted"])
             y += self._lh("small")
-
-        if kind == "weekly_all":
-            budget = daily_budget(pct, item["resets_at"])
-            if budget:
-                days, per = budget
-                y = self._label_box(x0, x1, y + 8, i18n.t("budget.left", days=days),
-                                    i18n.t("budget.per_day", pct=per), P)
         return y
 
-    def _timeline(self, x0, x1, y, n, progress, labels, pct, bar, reserve, P):
-        """시간 칸 n개 + 겹친 사용량 막대 + 예약선. 반환: 다음 y."""
+    def _bar(self, x0, x1, y, pct, color, progress, reserve, P):
+        """한 줄 막대. 바탕(slot) 위에 흐른 시간만큼 옅은 음영, 그 위에 사용량.
+
+        사용량 끝이 음영보다 앞서면 시간보다 빨리 쓰는 중이다.
+        """
         c = self.canvas
-        H = theme.SLOT_H_WEEK if labels else theme.SLOT_H
-        y += 3                              # 현재 칸 테두리 자리
-        gap = theme.SLOT_GAP
-        sw = (x1 - x0 - gap * (n - 1)) / n
-        idx = min(int(progress * n), n - 1)
-        part = progress * n - idx
-        for i in range(n):
-            sx = x0 + i * (sw + gap)
-            _round_rect(c, sx, y, sx + sw, y + H, theme.SLOT_R,
-                        fill=P["slot_past"] if i < idx else P["slot"], outline="")
-            if i == idx:
-                if part > 0.02:
-                    _round_rect(c, sx, y, sx + sw * part, y + H, theme.SLOT_R,
-                                fill=P["slot_past"], outline="")
-                _round_rect(c, sx - 2, y - 2, sx + sw + 2, y + H + 2, theme.SLOT_R + 2,
-                            fill="", outline=P["ink2"], width=1.5)
-            if labels:
-                # 지난 칸은 바탕이 진해서 ink로 — 어두운 테마에서 ink2는 대비가 모자란다
-                c.create_text(sx + sw / 2, y + (H - 10) / 2 + 1, text=labels[i],
-                              font=self.f["tiny"],
-                              fill=P["ink"] if i < idx else P["ink2"])
-        by = y + H - theme.USE_BOTTOM - theme.USE_H
-        self._use_bar(x0, x1, by, pct, bar, P, ring=True)
+        h = theme.BAR_H
+        r = h / 2
+        _round_rect(c, x0, y, x1, y + h, r, fill=P["slot"], outline="")
+        if progress:
+            pw = (x1 - x0) * progress
+            if pw >= 1:
+                _round_rect(c, x0, y, x0 + pw, y + h, r, fill=P["slot_past"], outline="")
+        w = (x1 - x0) * max(0.0, min(pct, 100)) / 100
+        if w >= 1:
+            _round_rect(c, x0, y, x0 + w, y + h, r, fill=color, outline="")
         if reserve > 0:
             rx = x0 + (x1 - x0) * (100 - reserve) / 100
-            c.create_line(rx, y - 3, rx, y + H + 3, fill=P["reserve"], width=2)
-        return y + H + 3
+            c.create_line(rx, y - 3, rx, y + h + 3, fill=P["reserve"], width=2)
+        return y + h
 
-    def _use_bar(self, x0, x1, y, pct, color, P, ring=False):
-        c = self.canvas
-        w = (x1 - x0) * max(0.0, min(pct, 100)) / 100
-        if w < 1:
-            return
-        h = theme.USE_H
-        if ring:   # 칸 위에서도 막대가 떠 보이게 카드색 테두리를 두른다
-            _round_rect(c, x0 - 1.5, y - 1.5, x0 + w + 1.5, y + h + 1.5, 3.5,
-                        fill=P["card"], outline="")
-        _round_rect(c, x0, y, x0 + w, y + h, 2, fill=color, outline="")
+    def _daily_graph(self, x0, x1, y, item, P):
+        """주간: 요일별 사용량 막대그래프 + 하루 예산 점선. 반환: 다음 y."""
+        c, f = self.canvas, self.f
+        pct = item["used_pct"]
+        resets = item["resets_at"].astimezone()
+        start = (resets - WINDOW_LEN["weekly_all"]).timestamp()
+        now = time.time()
+        usage = history.daily_usage(self.history, start, now)
+        today = min(6, max(0, int((now - start) // history.DAY)))
+        labels = slot_labels("weekly_all", item["resets_at"])
+
+        days_left = max(1.0, (resets.timestamp() - now) / history.DAY)
+        budget = max(0.0, (100 - pct) / days_left)
+        known = [u for u in usage if u is not None]
+        scale = max(known + [budget, 100 / 7]) * 1.15
+
+        H = theme.DAY_H
+        gap = theme.DAY_GAP
+        cw = (x1 - x0 - gap * 6) / 7
+        base = y + H
+        for i in range(7):
+            cx0 = x0 + i * (cw + gap)
+            _round_rect(c, cx0, y, cx0 + cw, base, theme.DAY_R,
+                        fill=P["slot"], outline="")
+            u = usage[i]
+            if u is not None and u > 0:
+                bh = max(2.0, H * min(1.0, u / scale))
+                col = P["high"] if u > budget * 1.05 else P["accent"]
+                _round_rect(c, cx0, base - bh, cx0 + cw, base, theme.DAY_R,
+                            fill=col, outline="")
+            if i == today:
+                _round_rect(c, cx0 - 2, y - 2, cx0 + cw + 2, base + 2, theme.DAY_R + 2,
+                            fill="", outline=P["ink2"], width=1.5)
+        # 하루 예산 기준선 — 막대가 이 선을 넘은 날은 예산보다 많이 쓴 날이다
+        by = base - H * min(1.0, budget / scale)
+        c.create_line(x0, by, x1, by, fill=P["ink2"], dash=(3, 3))
+
+        y = base + 4
+        for i in range(7):
+            c.create_text(x0 + i * (cw + gap) + cw / 2, y, text=labels[i], anchor="n",
+                          font=f["tiny"], fill=P["ink"] if i == today else P["muted"])
+        y += self._lh("tiny")
+
+        # 범례: 점선 + "하루 예산 N%"
+        y += 4
+        ly = y + self._lh("small") / 2
+        c.create_line(x0, ly, x0 + 14, ly, fill=P["ink2"], dash=(3, 3))
+        c.create_text(x0 + 20, ly, text=i18n.t("budget.legend", pct=round(budget)),
+                      anchor="w", font=f["small"], fill=P["ink2"])
+        return y + self._lh("small")
 
     def _label_box(self, x0, x1, y, left, stamp, P, grey=False):
         """점선 상자: 왼쪽 글자 + 오른쪽 이중 테두리 도장."""
@@ -566,7 +627,7 @@ class Widget:
         return y + h
 
     def _draw_pill(self, P):
-        """접힌 알약: 세션 칸 5개 축소판 + 세션 % + 주간 %."""
+        """접힌 알약: 세션 막대 + 세션 % + 주간 %."""
         c, f = self.canvas, self.f
         H = theme.PILL_H
         visible = self._visible()
@@ -574,24 +635,16 @@ class Widget:
         weekly = next((it for it in visible if limit_kind(it["id"]) == "weekly_all"), None)
         main = session or max(visible, key=lambda it: it["used_pct"], default=None)
 
-        # 미니 칸 상자
-        bx0, by0 = 6, 6
-        n, sw, gap = 5, 7, 2
-        bx1 = bx0 + 5 + n * sw + (n - 1) * gap + 5
-        _round_rect(c, bx0, by0, bx1, H - 6, 12, fill=P["surface"], outline="")
-        progress = time_progress("session", session["resets_at"]) if session else None
-        idx = min(int(progress * n), n - 1) if progress is not None else -1
-        sy0, sy1 = by0 + 5, H - 11
-        for i in range(n):
-            sx = bx0 + 5 + i * (sw + gap)
-            c.create_rectangle(sx, sy0, sx + sw, sy1, outline="",
-                               fill=P["slot_past"] if i < idx else P["slot"])
+        bx0, bx1 = 14, 58
         if main:
             pct = main["used_pct"]
-            bar = P["high"] if pct >= 70 else P["accent"]
-            self._use_bar(bx0 + 5, bx1 - 5, sy1 - 6, pct, bar, P, ring=True)
+            progress = time_progress(limit_kind(main["id"]), main["resets_at"])
+            self._bar(bx0, bx1, H / 2 - theme.BAR_H / 2, pct,
+                      P["high"] if pct >= 70 else P["accent"], progress, 0, P)
+        else:
+            self._bar(bx0, bx1, H / 2 - theme.BAR_H / 2, 0, P["accent"], None, 0, P)
 
-        tx = bx1 + 8
+        tx = bx1 + 10
         pct_text = f"{main['used_pct']:.0f}%" if main else i18n.t("pill.init")
         if weekly and weekly is not main:
             t1 = c.create_text(tx, H / 2 - 7, text=pct_text, anchor="w",
@@ -603,11 +656,236 @@ class Widget:
             t1 = c.create_text(tx, H / 2, text=pct_text, anchor="w",
                                font=f["pill_pct"], fill=P["ink"])
             right = c.bbox(t1)[2]
-        W = int(right + 14)
+        W = int(right + 16)
         bg = _round_rect(c, 1, 1, W - 1, H - 1, H / 2, fill=P["card"],
                          outline=P["outline"], width=1)
         c.tag_lower(bg)
         return W, H
+
+    # ── 설정 패널 ───────────────────────────────────────
+    # 카드와 같은 캔버스에 그린다. 값은 _draft에만 바꾸고 저장할 때 cfg로 옮긴다.
+    # 입력칸(Entry) 대신 −/+ 단추를 쓴다 — 손으로 친 값의 검증·포커스 처리가 필요 없다.
+    RESERVE_RANGE = (0, 100)         # 자동화 1개당 예약 % (load_config와 같은 범위)
+    INTERVAL_RANGE = (3, 60)         # 갱신 간격(분). 하한 3분 = 불변조건 4.
+    # 상한은 −/+로 올릴 수 있는 끝일 뿐이다. config.json에 이미 더 큰 값이 있으면
+    # 그 값까지는 그대로 둔다(저장만 눌렀는데 간격이 바뀌면 안 된다).
+
+    def open_settings(self):
+        if self._draft is not None:
+            return
+        minutes = max(self.INTERVAL_RANGE[0], self.cfg["poll_interval"] // 60)
+        self._draft = {
+            "language": self.cfg["language"],
+            "theme": self.cfg["theme"],
+            "hidden_labels": list(self.cfg["hidden_labels"]),
+            "automation_reserve_pct": self.cfg["automation_reserve_pct"],
+            "poll_minutes": minutes,
+            # 열 때 값. 저장할 때 이와 같으면 cfg를 건드리지 않는다 — 분 단위로
+            # 내림한 값(200초 → 3분)이 원래 초 값을 덮어쓰지 않게.
+            "_orig_reserve": self.cfg["automation_reserve_pct"],
+            "_orig_minutes": minutes,
+        }
+        self._redraw()
+
+    def _limit_labels(self):
+        """칩으로 보여 줄 (한도 이름, 숨길 때 저장할 문자열, id). 숨긴 것도 포함.
+
+        이름("Opus 주간", "세션 (5시간)")은 언어마다 달라서 그대로 저장하면 언어를
+        바꿀 때 숨김이 풀린다. 그래서 모델별 한도는 모델명("opus")을, 모델명이 없는
+        한도는 종류 토큰("kind:session")을 저장한다.
+        """
+        seen = []
+        for it in self.limits or []:
+            scope = str(it["id"]).partition(":")[2].strip()
+            token = scope.lower() if scope else KIND_TOKEN + limit_kind(it["id"])
+            if all(it["label"] != s[0] for s in seen):
+                seen.append((it["label"], token, it["id"]))
+        return seen
+
+    def _settings_action(self, name):
+        d = self._draft
+        if d is None:
+            return
+        action, _, arg = name.partition(":")
+        if action == "set_cancel":
+            self._draft = None
+        elif action == "set_save":
+            self._apply_settings()
+            return
+        elif action == "set_lang":
+            d["language"] = arg
+        elif action == "set_theme":
+            d["theme"] = arg
+        elif action == "set_chip":
+            label, token, item_id = self._limit_labels()[int(arg)]
+            hits = [h for h in d["hidden_labels"] if self._hides(h, label, item_id)]
+            if hits:        # 숨김 → 보임: 이 이름에 걸리는 숨김 문자열을 모두 뺀다
+                d["hidden_labels"] = [h for h in d["hidden_labels"] if h not in hits]
+            else:
+                d["hidden_labels"].append(token)
+        elif action == "set_res":
+            lo, hi = self.RESERVE_RANGE
+            d["automation_reserve_pct"] = min(hi, max(lo, d["automation_reserve_pct"] + int(arg)))
+        elif action == "set_int":
+            lo, hi = self.INTERVAL_RANGE
+            hi = max(hi, d["_orig_minutes"])
+            d["poll_minutes"] = min(hi, max(lo, d["poll_minutes"] + int(arg)))
+        self._redraw()
+
+    def _apply_settings(self):
+        d, self._draft = self._draft, None
+        lang_changed = d["language"] != self.cfg["language"]
+        self.cfg["theme"] = d["theme"]
+        self.dark_var.set(d["theme"] == "dark")
+        self.cfg["hidden_labels"] = d["hidden_labels"]
+        if d["automation_reserve_pct"] != d["_orig_reserve"]:
+            self.cfg["automation_reserve_pct"] = d["automation_reserve_pct"]
+        if d["poll_minutes"] != d["_orig_minutes"]:
+            # 폴링 스레드는 다음 대기부터 새 간격을 쓴다. 하한 180초(불변조건 4).
+            self.cfg["poll_interval"] = max(180, d["poll_minutes"] * 60)
+        if lang_changed:
+            self.cfg["language"] = i18n.set_language(d["language"])
+            self.root.title(i18n.t("app.title"))
+            self.menu.destroy()
+            self._build_menu()          # 메뉴 글자는 만들 때 굳으므로 다시 만든다
+        self._save_config()
+        if lang_changed:
+            # 한도 이름은 usage_api가 응답을 받을 때 번역한다 — 다시 받아야 바뀐다.
+            self.manual_refresh()
+        else:
+            self._redraw()
+
+    def _draw_settings(self, P):
+        c, f = self.canvas, self.f
+        d = self._draft
+        W = theme.SETTINGS_W
+        x0, x1 = theme.PAD_X, W - theme.PAD_X
+        y = theme.PAD_TOP
+
+        cy = y + 12
+        c.create_text(x0, cy, text=i18n.t("settings.title"), anchor="w",
+                      font=f["title"], fill=P["ink"])
+        self._icon("close", x1 - 10, cy, P, name_as="set_cancel")
+        y += 30
+        c.create_line(0, y, W, y, fill=P["rule"])
+
+        def group(title, y):
+            y += 10
+            c.create_text(x0, y, text=title, anchor="nw", font=f["small"], fill=P["muted"])
+            return y + self._lh("small") + 4
+
+        def label(text, y, hint=None):
+            if hint is None:
+                c.create_text(x0, y + 16, text=text, anchor="w", font=f["name"], fill=P["ink"])
+                return y + 32
+            c.create_text(x0, y + 4, text=text, anchor="nw", font=f["name"], fill=P["ink"])
+            c.create_text(x0, y + 6 + self._lh("name"), text=hint, anchor="nw",
+                          font=f["small"], fill=P["muted"])
+            return y + 12 + self._lh("name") + self._lh("small")
+
+        # 표시
+        y = group(i18n.t("settings.display"), y)
+        ny = label(i18n.t("settings.language"), y)
+        self._segmented(x1, y + 16, [("en", "English"), ("ko", "한국어")],
+                        d["language"], "set_lang", P)
+        y = ny
+        ny = label(i18n.t("settings.theme"), y)
+        self._segmented(x1, y + 16, [("light", i18n.t("settings.theme.light")),
+                                     ("dark", i18n.t("settings.theme.dark"))],
+                        d["theme"], "set_theme", P)
+        y = ny + 6
+        c.create_line(0, y, W, y, fill=P["rule"])
+
+        # 보일 한도
+        y = group(i18n.t("settings.limits"), y)
+        labels = self._limit_labels()
+        if not labels:
+            c.create_text(x0, y, text=i18n.t("settings.limits_empty"), anchor="nw",
+                          font=f["small"], fill=P["muted"])
+            y += self._lh("small") + 10
+        else:
+            cx, cy0 = x0, y
+            for i, (text, _token, item_id) in enumerate(labels):
+                shown = not any(self._hides(h, text, item_id) for h in d["hidden_labels"])
+                tw = f["small"].measure(text) + 20
+                if cx + tw > x1 and cx > x0:
+                    cx, cy0 = x0, cy0 + 30
+                tags = ("btn", f"btn:set_chip:{i}")
+                _round_rect(c, cx, cy0, cx + tw, cy0 + 24, 12, tags=tags,
+                            fill=P["flag_bg"] if shown else P["card"],
+                            outline="" if shown else P["rule"])
+                c.create_text(cx + tw / 2, cy0 + 12, text=text, font=f["small"], tags=tags,
+                              fill=P["flag_fg"] if shown else P["muted"])
+                cx += tw + 6
+            y = cy0 + 24 + 10
+        c.create_line(0, y, W, y, fill=P["rule"])
+
+        # 동작
+        y = group(i18n.t("settings.behavior"), y)
+        ny = label(i18n.t("settings.reserve"), y,
+                   hint=i18n.t("settings.reserve_hint", count=self.automations))
+        self._stepper(x1, (y + ny) / 2, f"{d['automation_reserve_pct']}%", "set_res", P)
+        y = ny
+        ny = label(i18n.t("settings.interval"), y, hint=i18n.t("settings.interval_hint"))
+        self._stepper(x1, (y + ny) / 2, i18n.t("settings.minutes", n=d["poll_minutes"]),
+                      "set_int", P)
+        y = ny + 6
+
+        # 취소 / 저장
+        c.create_line(0, y, W, y, fill=P["rule"])
+        y += 10
+        bx = x1
+        for key, primary in (("save", True), ("cancel", False)):
+            text = i18n.t(f"settings.{key}")
+            tw = f["name"].measure(text) + 24
+            tags = ("btn", f"btn:set_{key}")
+            _round_rect(c, bx - tw, y, bx, y + 30, 8, tags=tags,
+                        fill=P["ink"] if primary else P["card"],
+                        outline="" if primary else P["rule"])
+            c.create_text(bx - tw / 2, y + 15, text=text, font=f["name"], tags=tags,
+                          fill=P["card"] if primary else P["ink"])
+            bx -= tw + 8
+        y += 30 + theme.PAD_BOTTOM
+
+        bg = _round_rect(c, 1, 1, W - 1, y - 1, theme.RADIUS,
+                         fill=P["card"], outline=P["outline"], width=1)
+        c.tag_lower(bg)
+        return W, int(y)
+
+    def _segmented(self, right, cy, options, selected, action, P):
+        """오른쪽 정렬 분절 단추. 고른 칸만 카드색으로 떠 보인다."""
+        c, f = self.canvas, self.f
+        widths = [f["small"].measure(text) + 18 for _, text in options]
+        total = sum(widths) + 4 + 2 * (len(options) - 1)
+        x = right - total
+        _round_rect(c, x, cy - 13, right, cy + 13, 9, fill=P["slot"], outline="")
+        x += 2
+        for (key, text), w in zip(options, widths):
+            on = key == selected
+            tags = ("btn", f"btn:{action}:{key}")
+            _round_rect(c, x, cy - 11, x + w, cy + 11, 7, tags=tags,
+                        fill=P["card"] if on else P["slot"], outline="")
+            c.create_text(x + w / 2, cy, text=text, font=f["small"], tags=tags,
+                          fill=P["ink"] if on else P["muted"])
+            x += w + 2
+
+    def _stepper(self, right, cy, value, action, P):
+        """[− 값 +] 단추. 범위는 _settings_action이 클램프한다."""
+        c, f = self.canvas, self.f
+        w = 96
+        x = right - w
+        _round_rect(c, x, cy - 13, right, cy + 13, 8, fill=P["card"], outline=P["muted"])
+        for sign, bx in (("-1", x + 13), ("1", right - 13)):
+            name = f"{action}:{sign}"
+            tags = ("btn", f"btn:{name}")
+            c.create_rectangle(bx - 12, cy - 12, bx + 12, cy + 12, fill=P["card"],
+                               outline="", tags=tags)
+            kw = dict(fill=P["muted"], width=1.6, capstyle="round",
+                      tags=tags + (f"icon:{name}",))
+            c.create_line(bx - 4, cy, bx + 4, cy, **kw)
+            if sign == "1":
+                c.create_line(bx, cy - 4, bx, cy + 4, **kw)
+        c.create_text(x + w / 2, cy, text=value, font=f["small"], fill=P["ink"])
 
     def _place_window(self):
         self.root.update_idletasks()
@@ -631,11 +909,16 @@ class Widget:
         return i18n.t("status.line", interval=interval, fresh=fresh)
 
     def _status_text(self):
-        """(문구, 강조 여부). 오류 > 갱신 중 > 예약선 침범 > 평소."""
-        if self.err_key:
-            return i18n.t(self.err_key), True
+        """(문구, 강조 여부). 갱신 중 > 폴링 오류 > 로컬 오류 > 예약선 침범 > 평소.
+
+        갱신 중이 오류보다 앞선다 — 오류 뒤에 새로고침을 눌렀을 때 눌린 줄 알 수 있게.
+        """
         if self._refreshing:
             return i18n.t("refreshing"), False
+        if self.err_key:
+            return i18n.t(self.err_key), True
+        if self.local_msg:
+            return i18n.t(self.local_msg), True
         warn = self._reserve_warn()
         if warn:
             n, pct = warn
@@ -681,12 +964,19 @@ class Widget:
                     self.automations = autos
                     self.limits = data
                     self.err_key = None
+                    self.local_msg = None
+                    self._record_history(data)
                 else:
                     self.err_key = ERROR_KEYS.get(type(payload), UNEXPECTED_ERROR_KEY)
         except queue.Empty:
             pass
         if changed:
-            self._redraw()
+            if self._sx is None:
+                self._redraw()
+            else:
+                # 드래그 중에 창 크기·위치를 다시 박으면 끌기가 튄다(_tick과 같은 이유).
+                # 놓을 때(_release) 그린다.
+                self._redraw_pending = True
         self.root.after(200, self._drain_queue)
 
     def _tick(self):
@@ -700,9 +990,42 @@ class Widget:
         self._refreshing = True
         self._redraw()
         self._refresh_now.set()
+        self._start_spin()
+
+    # ── 새로고침 회전 ───────────────────────────────────
+    def _start_spin(self):
+        self._spin_until = time.time() + 0.75      # 갱신이 빨라도 한 바퀴는 돈다
+        if not self._spinning:
+            self._spinning = True
+            self._spin_step()
+
+    def _spin_step(self):
+        busy = self._refreshing or time.time() < self._spin_until
+        self._spin = (self._spin + 24.0) % 360 if busy else 0.0
+        # 카드 전체가 아니라 아이콘 선만 다시 그린다(30ms마다 전체를 그리면 깜빡인다).
+        if not self.minimized and self._draft is None and hasattr(self, "_refresh_xy"):
+            c = self.canvas
+            col = c.itemcget("icon:refresh", "fill") if c.find_withtag("icon:refresh") \
+                else self._palette()["muted"]
+            c.delete("icon:refresh")
+            self._icon_lines("refresh", *self._refresh_xy, col,
+                             ("btn", "btn:refresh", "icon:refresh"), self._spin)
+        if busy:
+            self.root.after(30, self._spin_step)
+        else:
+            self._spinning = False
+
+    # ── 주간 기록 ───────────────────────────────────────
+    def _record_history(self, data):
+        weekly = next((it for it in data if limit_kind(it["id"]) == "weekly_all"), None)
+        if weekly is None:
+            return
+        if history.record(self.history, time.time(), weekly["used_pct"]):
+            history.save(HISTORY_PATH, self.history)
 
     # ── 최소화(알약) 토글 ────────────────────────────────
     def toggle_minimize(self):
+        self._draft = None              # 설정 중에 접으면 편집은 버린다
         self.minimized = not self.minimized
         self.cfg["minimized"] = self.minimized
         self._redraw()
@@ -731,8 +1054,14 @@ class Widget:
                 self._invoke(pressed, e)
         elif moved:
             self._save_config()
+        elif self._draft is not None:
+            pass                     # 설정 패널의 빈 곳 클릭 — 알약 상태에서 열었어도 접지 않는다
         elif self.minimized:
             self.toggle_minimize()   # 알약 클릭(이동 아님) → 복원
+        # 드래그 중 미뤄 둔 다시 그리기. 위 동작이 이미 그렸으면 _redraw가 플래그를
+        # 내렸다. 닫기(quit)로 창이 없어졌으면 그리지 않는다.
+        if self._redraw_pending and not self._stop.is_set():
+            self._redraw()
 
     def _invoke(self, name, e):
         if name == "close":
@@ -742,7 +1071,9 @@ class Widget:
         elif name == "min":
             self.toggle_minimize()
         elif name == "menu":
-            self.menu.tk_popup(e.x_root, e.y_root)
+            self.open_settings()
+        elif name.startswith("set_"):
+            self._settings_action(name)
 
     def _save_config(self):
         self.cfg["x"], self.cfg["y"] = self.root.winfo_x(), self.root.winfo_y()
@@ -775,11 +1106,20 @@ class Widget:
                 STARTUP_BAT.unlink(missing_ok=True)
         except (OSError, UnicodeError):  # 방어선 유지
             self.autostart_var.set(STARTUP_BAT.exists())
-            self.err_key = "status.autostart_failed"
+            # err_key가 아니라 local_msg — err_key는 '값이 낡았다'는 뜻이라
+            # 카드를 흐리게 하고 위험 표시를 끈다(_stale).
+            self.local_msg = "status.autostart_failed"
             self._redraw()
+            return
+        self.local_msg = None
+        self._redraw()
 
     def _toggle_theme(self):
         self.cfg["theme"] = "dark" if self.dark_var.get() else "light"
+        if self._draft is not None:
+            # 설정 패널이 열려 있으면 편집 값도 따라간다. 안 그러면 저장할 때
+            # 열 때 복사해 둔 옛 테마로 되돌아간다.
+            self._draft["theme"] = self.cfg["theme"]
         self._redraw()
         self._save_config()
 

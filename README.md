@@ -68,21 +68,24 @@ Never delete it to "fix" anything.
 | Action | What it does |
 |---|---|
 | Drag anywhere on the card | Move it. The position is saved. |
-| **≡** | Open the menu (same as right-click) |
+| **⚙** | Settings: language, theme, which limits to show, reserve per automation, refresh interval. Nothing changes until you press Save. |
 | **—** | Shrink to a small pill badge showing the session and weekly percentages. Click the pill to restore. |
 | **⟳** | Refresh now |
 | **✕** | Quit |
-| Right-click | Refresh · Minimize/restore · Always on top · Run at startup · Dark theme · Quit |
+| Right-click | Settings · Refresh · Minimize/restore · Always on top · Run at startup · Dark theme · Quit |
 
-**Reading a row.** The blocks are *time*: one per hour for the 5-hour session, one per
-day for the week. Blocks fill in as time passes and the outlined block is now. The thin
-bar over them is *usage*. If the bar runs ahead of the filled blocks, you are spending
+**Reading a row.** Each bar has a faint shade for how much of the window has passed and a
+clay fill for how much you have used. If the fill runs ahead of the shade, you are spending
 faster than the window is passing.
+
+The weekly row is a small chart of how much you used on each day of the week, with a dashed
+line at your daily budget (what is left, split over the days left). The API only reports the
+running weekly total, so the widget records it as it polls (`usage_history.json`, next to
+`main.py`) and works out each day from that. Days the widget was not running stay empty.
 
 - 70% and above: an "over 70%" tag appears and the bar turns a deeper clay.
 - 90% and above, or past the automation line: the whole card flips (dark card in the
   light theme, light card in the dark theme).
-- The weekly row shows a daily budget: what is left, split over the days left.
 - If a refresh fails, the last values stay on the card, dimmed, with how old they are.
 
 The colors are Claude's clay, ivory and slate. Switch to the dark theme from the menu.
@@ -96,7 +99,7 @@ breaking — if you edit it, keep the encoding and the `chcp` line in sync.
 ### Automation headroom
 
 If you have scheduled tasks in `~/.claude/scheduled-tasks/`, the widget draws a red limit
-line across the session blocks so you can see whether you are about to spend the room those tasks
+line across the session bar so you can see whether you are about to spend the room those tasks
 will need.
 
 - Reserved = (number of automations) × `automation_reserve_pct` (default 5% each, capped
@@ -120,7 +123,7 @@ stopping the widget from opening.
 | `poll_interval` | `180` | Seconds between refreshes. **Clamped to a minimum of 180** — polling faster triggers HTTP 429. |
 | `automation_reserve_pct` | `5` | Session percentage to reserve per scheduled automation (0–100) |
 | `language` | `"en"` | `"en"` or `"ko"`. Anything else silently falls back to English. |
-| `hidden_labels` | `[]` | Hide any row whose label contains one of these strings (case-insensitive). E.g. `["fable"]`. |
+| `hidden_labels` | `[]` | Hide any row whose label contains one of these strings (case-insensitive). E.g. `["fable"]`. `"kind:session"` / `"kind:weekly_all"` hide those rows by type, in any language (the settings panel saves these). |
 | `auto_refresh_token` | `true` | Whether to refresh the OAuth token — and write `~/.claude/.credentials.json` — when it expires |
 | `theme` | `"light"` | `"light"` or `"dark"`. Anything else falls back to light. |
 
@@ -166,7 +169,7 @@ it before changing anything in the token or locking paths. It and the subagent d
 in `.claude/agents/` are written in Korean.
 
 There is no test framework. Verification means running
-`python -m py_compile main.py usage_api.py i18n.py theme.py`, then
+`python -m py_compile main.py usage_api.py i18n.py theme.py history.py`, then
 `python usage_api.py` to print live values, then opening the widget and comparing against
 `/usage`.
 

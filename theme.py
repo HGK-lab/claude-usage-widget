@@ -97,11 +97,10 @@ PAD_X = 16            # 카드 좌우 안쪽 여백
 PAD_TOP = 12
 PAD_BOTTOM = 12
 RADIUS = 14           # 카드 모서리
-SLOT_GAP = 2          # 시간 칸 사이
-SLOT_H = 20           # 세션 칸 높이
-SLOT_H_WEEK = 26      # 주간 칸 높이(요일 글자 자리 포함)
-SLOT_R = 5            # 칸 모서리
-USE_H = 4             # 사용량 막대 두께
-USE_BOTTOM = 3        # 칸 아래쪽에서 막대까지
+BAR_H = 6             # 한도 막대 두께(바탕 = 흐른 시간 음영 + 사용량)
+DAY_H = 36            # 요일별 사용량 그래프 높이
+DAY_GAP = 4           # 요일 막대 사이
+DAY_R = 3             # 요일 막대 모서리
 ROW_GAP = 12          # 한도 행 사이
 PILL_H = 40
+SETTINGS_W = 316     # 설정 패널 폭
