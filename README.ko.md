@@ -7,7 +7,13 @@ Claude Code의 사용 한도 — 5시간 세션, 주간 전체, 모델별 주간
 
 [English →](README.md)
 
-![바탕화면에 떠 있는 위젯 — 세션·주간 사용량 바](docs/screenshot.png)
+![Claude 사용량 위젯 — 세션·주간 사용량을 바탕화면 카드에 표시](docs/showcase/01_cover.png)
+
+| 요일별 사용량 | 상태별 카드 | 설정 패널 |
+|---|---|---|
+| ![하루 막대 하나씩 그린 주간 사용량과 하루 예산 점선](docs/showcase/02_weekly.png) | ![70% 미만, 70% 넘음, 90% 넘음(카드 반전), 갱신 실패 네 가지 상태](docs/showcase/03_states.png) | ![밝은·어두운 테마의 설정 패널](docs/showcase/04_settings.png) |
+
+<sub>화면은 더미 데이터로 띄워 찍었다.</sub>
 
 ## ⚠️ 설치 전에 반드시 읽을 것
 

@@ -8,7 +8,13 @@ It reads the same numbers `/usage` reads and reports them the same way: **percen
 
 [한국어 문서 →](README.ko.md)
 
-![The widget on the desktop, showing the session and weekly usage bars](docs/screenshot.png)
+![Claude Usage Widget: session and weekly usage on a desktop card](docs/showcase/01_cover.png)
+
+| Weekly usage by day | Card states | Settings panel |
+|---|---|---|
+| ![Weekly usage drawn as one bar per day, with a dashed daily-budget line](docs/showcase/02_weekly.png) | ![Four card states: under 70%, over 70%, over 90% (card flips), refresh failed](docs/showcase/03_states.png) | ![Settings panel in the light and dark theme](docs/showcase/04_settings.png) |
+
+<sub>Screens are shown with the Korean UI and dummy data. Set `"language": "en"` for English.</sub>
 
 ## ⚠️ Read this before you install
 

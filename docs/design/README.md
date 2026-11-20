@@ -1,12 +1,12 @@
 # 위젯 디자인 시안 (2026-11-19)
 
-구현 전 HTML 시안. tkinter 코드는 아직 바뀌지 않았다.
+구현 전 HTML 시안. 2026-11-20에 `claude-bi/`를 채택해 tkinter로 옮겼다. 구현 기준은 저장소 루트의 `DESIGN.md`다.
 
 | 폴더 | 내용 | 상태 |
 |---|---|---|
-| `brand/` | v2 구조(시간 칸 + 사용량 막대) + 원래 테라코타 라인아트 | **채택 후보** |
+| `brand/` | v2 구조(시간 칸 + 사용량 막대) + 원래 테라코타 라인아트 | 비교용 |
 | `hallmark/` | v2 구조, hallmark Dose 테마(종이 + 약국 초록) | 비교용 |
-| `claude-bi/` | hallmark v2 구조 + Claude BI 색(Clay `#D97757`, Ivory `#FAF9F5`, Slate `#141413`). 로고는 안 씀 | 비교용 |
+| `claude-bi/` | hallmark v2 구조 + Claude BI 색(Clay `#D97757`, Ivory `#FAF9F5`, Slate `#141413`). 로고는 안 씀 | **채택** |
 | `taste/` | taste-skill 딜(soot + lime, Familjen Grotesk) | 비교용 (v1 구조) |
 
 각 폴더의 `preview.png`가 1440px 렌더본이다.
