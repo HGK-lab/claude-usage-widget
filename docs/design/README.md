@@ -6,6 +6,7 @@
 |---|---|---|
 | `brand/` | v2 구조(시간 칸 + 사용량 막대) + 원래 테라코타 라인아트 | **채택 후보** |
 | `hallmark/` | v2 구조, hallmark Dose 테마(종이 + 약국 초록) | 비교용 |
+| `claude-bi/` | hallmark v2 구조 + Claude BI 색(Clay `#D97757`, Ivory `#FAF9F5`, Slate `#141413`). 로고는 안 씀 | 비교용 |
 | `taste/` | taste-skill 딜(soot + lime, Familjen Grotesk) | 비교용 (v1 구조) |
 
 각 폴더의 `preview.png`가 1440px 렌더본이다.
