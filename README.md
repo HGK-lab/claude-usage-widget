@@ -129,7 +129,7 @@ stopping the widget from opening.
 | `poll_interval` | `180` | Seconds between refreshes. **Clamped to a minimum of 180** — polling faster triggers HTTP 429. |
 | `automation_reserve_pct` | `5` | Session percentage to reserve per scheduled automation (0–100) |
 | `language` | `"en"` | `"en"` or `"ko"`. Anything else silently falls back to English. |
-| `hidden_labels` | `[]` | Hide any row whose label contains one of these strings (case-insensitive). E.g. `["fable"]`. `"kind:session"` / `"kind:weekly_all"` hide those rows by type, in any language (the settings panel saves these). |
+| `hidden_labels` | `[]` | Hide any row whose label contains one of these strings (case-insensitive). E.g. `["fable"]`. `"kind:session"` / `"kind:weekly_all"` hide those rows by type and `"model:opus"` hides exactly that model's row, in any language (the settings panel saves these). A bare model name saved by the settings panel of the first v2 build (2026-11-20) still matches by substring, so `"opus 5"` also hides `Opus 5.5`; toggle the chip off and on to save it as `model:`. |
 | `auto_refresh_token` | `true` | Whether to refresh the OAuth token — and write `~/.claude/.credentials.json` — when it expires |
 | `theme` | `"light"` | `"light"` or `"dark"`. Anything else falls back to light. |
 

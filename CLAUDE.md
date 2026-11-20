@@ -83,7 +83,7 @@ run_widget.bat
 | `poll_interval` | `180` | 폴링 간격(초). **180 미만으로 내려가지 않는다** (불변조건 4) |
 | `automation_reserve_pct` | `5` | 자동화 1개당 예약할 세션 한도 % (0~100으로 클램프) |
 | `language` | `"en"` | `"en"` 또는 `"ko"`. 모르는 값은 조용히 영어 |
-| `hidden_labels` | `[]` | 이 문자열이 라벨에 들어간 행을 숨김 (부분일치·대소문자 무시). `kind:<종류>`(예: `kind:session`)는 라벨 대신 id의 종류로 맞춘다. 리스트가 아니면 `[]` |
+| `hidden_labels` | `[]` | 이 문자열이 라벨에 들어간 행을 숨김 (부분일치·대소문자 무시). `kind:<종류>`(예: `kind:session`)는 라벨 대신 id의 종류로, `model:<모델명>`(예: `model:opus`)은 id의 모델명과 정확히 같을 때만 맞춘다. 리스트가 아니면 `[]` |
 | `auto_refresh_token` | `true` | 401 시 credentials 파일에 재발급 토큰을 쓸지 여부 |
 | `theme` | `"light"` | `"light"` 또는 `"dark"`. 모르는 값은 밝은 테마 |
 

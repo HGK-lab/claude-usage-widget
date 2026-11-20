@@ -114,7 +114,7 @@ python main.py
 | `poll_interval` | `180` | 갱신 간격(초). **최소 180으로 강제** — 더 자주 부르면 429가 난다 |
 | `automation_reserve_pct` | `5` | 예약 작업 1개당 남겨둘 세션 한도 % (0~100) |
 | `language` | `"en"` | `"en"` 또는 `"ko"`. 모르는 값은 조용히 영어로 폴백 |
-| `hidden_labels` | `[]` | 라벨에 이 문자열이 들어간 행을 숨긴다 (부분일치·대소문자 무시). 예: `["fable"]`. `"kind:session"`·`"kind:weekly_all"`은 언어와 상관없이 그 종류 행을 숨긴다(설정 패널이 이렇게 저장한다). |
+| `hidden_labels` | `[]` | 라벨에 이 문자열이 들어간 행을 숨긴다 (부분일치·대소문자 무시). 예: `["fable"]`. `"kind:session"`·`"kind:weekly_all"`은 그 종류 행을, `"model:opus"`는 모델명이 정확히 같은 행만 언어와 상관없이 숨긴다(설정 패널이 이렇게 저장한다). v2 첫 빌드(2026-11-20)의 설정 패널이 저장한 맨 모델명은 여전히 부분일치라 `"opus 5"`가 `Opus 5.5`도 숨긴다. 칩을 껐다 켜면 `model:` 형태로 다시 저장된다. |
 | `auto_refresh_token` | `true` | 토큰 만료 시 재발급하고 `~/.claude/.credentials.json`에 쓸지 여부 |
 | `theme` | `"light"` | `"light"` 또는 `"dark"`. 모르는 값은 밝은 테마 |
 

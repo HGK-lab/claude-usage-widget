@@ -6,6 +6,7 @@
 API 호출은 백그라운드 스레드, UI 갱신은 tkinter 메인 스레드(queue 경유).
 """
 
+import ctypes
 import json
 import math
 import os
@@ -64,12 +65,62 @@ LEGACY_KIND = {"five_hour": "session", "seven_day": "weekly_all"}
 # hidden_labels에서 이름 대신 한도 종류로 숨기는 토큰의 머리말("kind:session").
 # 세션·주간 전체처럼 모델명이 없는 한도는 이름이 언어마다 달라 이것으로 저장한다.
 KIND_TOKEN = "kind:"
+# 모델별 한도를 모델명으로 숨기는 토큰("model:opus"). 이름 일부가 아니라 id의
+# 모델명과 정확히 같아야 맞는다 — "opus 5"가 "Opus 5.5"까지 숨기지 않게.
+MODEL_TOKEN = "model:"
+# 로컬 오류(시작 프로그램 등록 실패) 문구를 상태줄에 두는 시간. 계속 두면 "N분 전 갱신"이
+# 영영 안 보인다. 실패 상태 자체는 메뉴 체크박스가 계속 보여 준다.
+LOCAL_MSG_SECS = 600
 
 
 def limit_kind(item_id: str) -> str:
     """usage_api가 만든 id("session:", "weekly_all:", "five_hour" …)에서 종류만."""
     kind = str(item_id).split(":", 1)[0]
     return LEGACY_KIND.get(kind, kind)
+
+
+class _Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_ulong), ("rcMonitor", ctypes.c_long * 4),
+                ("rcWork", ctypes.c_long * 4), ("dwFlags", ctypes.c_ulong)]
+
+
+def monitor_work_area(x: int, y: int, fallback):
+    """(x, y)에서 가장 가까운 모니터의 작업 영역 (왼, 위, 오른, 아래).
+
+    winfo_screenwidth/height는 주 모니터만 알려 준다. 그것으로 당기면 보조
+    모니터(음수 좌표 포함)에 둔 위젯이 주 모니터로 끌려온다. 실패하면 fallback.
+    """
+    try:
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = ctypes.c_void_p
+        user32.MonitorFromPoint.argtypes = [_Point, ctypes.c_ulong]
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(_MonitorInfo)]
+        pt = _Point(int(x), int(y))
+        hmon = user32.MonitorFromPoint(pt, 2)        # MONITOR_DEFAULTTONEAREST
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(_MonitorInfo)
+        if not hmon or not user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            return fallback
+        return tuple(info.rcWork)
+    except (AttributeError, OSError, TypeError, ValueError, OverflowError):
+        return fallback
+
+
+def left_button_down() -> bool:
+    """논리적 왼쪽 버튼(Tk의 Button-1)이 지금 눌려 있는지. 모르면 True.
+
+    GetAsyncKeyState는 물리 버튼을 보므로 좌우 바꾸기(SM_SWAPBUTTON)를 따른다.
+    """
+    try:
+        user32 = ctypes.windll.user32
+        vk = 0x02 if user32.GetSystemMetrics(23) else 0x01
+        return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+    except (AttributeError, OSError):
+        return True
 
 
 def flag_key(pct: float, reserve_hit: bool):
@@ -136,7 +187,7 @@ def _coerce_int(cfg, key, lo, hi=None):
     """cfg[key]를 int로 강제하고 범위에 클램프. 실패 시 DEFAULT_CONFIG 값."""
     try:
         value = int(cfg[key])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):   # 1e400 → inf
         value = DEFAULT_CONFIG[key]
     value = max(lo, value)
     if hi is not None:
@@ -147,13 +198,24 @@ def _coerce_int(cfg, key, lo, hi=None):
 def load_config() -> dict:
     cfg = dict(DEFAULT_CONFIG)
     try:
-        cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        pass
+        raw = None
+    # 최상위가 객체가 아니면([1, 2], "hi", null, 5) update가 던진다 — 기본값으로.
+    if isinstance(raw, dict):
+        cfg.update(raw)
     # 손으로 고친 config.json이 위젯을 깨거나(불변조건 5)
     # 폴링 하한 180초(불변조건 4)를 어기지 않도록 검증한다.
     _coerce_int(cfg, "poll_interval", 180)
     _coerce_int(cfg, "automation_reserve_pct", 0, 100)
+    # 창 위치: 정수가 아니면("1561", 1561.5) geometry가 TclError로 죽는다.
+    # 숫자로 읽히면 정수로, 아니면 None(기본 위치).
+    for key in ("x", "y"):
+        v = cfg.get(key)
+        try:
+            cfg[key] = None if v is None or isinstance(v, bool) else int(float(v))
+        except (TypeError, ValueError, OverflowError):
+            cfg[key] = None
     cfg["auto_refresh_token"] = bool(cfg.get("auto_refresh_token", True))
     raw_hidden = cfg.get("hidden_labels")
     cfg["hidden_labels"] = [
@@ -232,6 +294,10 @@ class Widget:
         self.local_msg = None           # 폴링과 무관한 로컬 오류 i18n 키(시작 프로그램 등록 실패 등)
         self._refreshing = False
         self._redraw_pending = False    # 드래그 중 도착한 결과 — 놓을 때 다시 그린다
+        self._panel_shift = (0, 0)      # 설정 패널이 화면 안에 들도록 당긴 양(닫을 때 되돌림)
+        self._panel_clamped = False     # 이번에 연 패널을 이미 당겼는지(처음 그릴 때만 당긴다)
+        self._local_msg_at = 0.0        # local_msg를 띄운 시각(monotonic)
+        self._last_motion = 0.0         # 마지막 누름·끌기 시각(monotonic) — _dragging
         self._sx = self._sy = None      # 드래그 시작 좌표 (None = 드래그 중 아님)
         self._drag_ox = self._drag_oy = 0
         self._pressed = None            # 눌린 버튼 이름 (떼는 순간 같은 버튼이면 실행)
@@ -304,10 +370,16 @@ class Widget:
         c.bind("<Button-1>", self._press)
         c.bind("<B1-Motion>", self._drag_move)
         c.bind("<ButtonRelease-1>", self._release)
-        c.bind("<Button-3>", lambda e: self.menu.tk_popup(e.x_root, e.y_root))
+        c.bind("<Button-3>", self._popup_menu)
         c.bind("<Motion>", self._hover)
         c.bind("<Leave>", lambda e: self._set_hover(None))
         self._hovered = None
+
+    def _popup_menu(self, e):
+        # tk_popup이 포인터를 잡아 왼쪽 버튼의 ButtonRelease를 삼킬 수 있다.
+        # 누른 상태를 남겨 두면 드래그 중으로 오인해 다시 그리기를 영영 미룬다.
+        self._drop_press()
+        self.menu.tk_popup(e.x_root, e.y_root)
 
     def _btn_at(self):
         for tag in self.canvas.gettags("current"):
@@ -335,10 +407,14 @@ class Widget:
 
     @staticmethod
     def _hides(token, label, item_id):
-        """숨김 문자열 하나가 이 한도를 가리는지. "kind:session"처럼 종류 토큰이면
-        id로, 아니면 이름(소문자)에 들어 있는지로 본다."""
+        """숨김 문자열 하나가 이 한도를 가리는지. "kind:session"은 id의 종류로,
+        "model:opus"는 id의 모델명과 정확히 같은지로, 그 밖의 문자열(손으로 적은
+        "fable" 등)은 이름(소문자)에 들어 있는지로 본다."""
         if token.startswith(KIND_TOKEN):
             return token[len(KIND_TOKEN):] == limit_kind(item_id)
+        if token.startswith(MODEL_TOKEN):
+            scope = str(item_id).partition(":")[2].strip().lower()
+            return bool(scope) and token[len(MODEL_TOKEN):] == scope
         return token in label.lower()
 
     def _visible(self):
@@ -383,16 +459,34 @@ class Widget:
         c.configure(width=w, height=h)
         self.root.update_idletasks()
         x, y = self.root.winfo_x(), self.root.winfo_y()
-        # 설정 패널은 카드보다 넓고 길다. 화면 밖으로 나가면 저장 단추를 못 누르므로
-        # 오른쪽·아래 끝에 맞춰 당긴다(_place_window와 같이 주 모니터 기준).
-        x = max(0, min(x, self.root.winfo_screenwidth() - w))
-        y = max(0, min(y, self.root.winfo_screenheight() - h))
+        if self._draft is not None:
+            if not self._panel_clamped:
+                # 설정 패널은 카드보다 넓고 길다. 화면 밖으로 나가면 저장 단추를 못
+                # 누르므로 창이 있는 모니터의 작업 영역 안으로 당긴다. 연 직후 한 번만
+                # 당긴다 — 그 뒤 사용자가 옮긴 패널을 _tick이 다시 끌어오지 않게.
+                # 카드·알약은 당기지 않는다(보조 모니터, 화면 끝에 둔 자리 존중).
+                nx, ny = self._clamp_to_monitor(x, y, w, h)
+                self._panel_shift = (nx - x, ny - y)
+                self._panel_clamped = True
+                x, y = nx, ny
+        else:
+            self._panel_clamped = False
+            if self._panel_shift != (0, 0):
+                # 패널을 닫았다: 열 때 당긴 만큼 되돌린다(패널을 끈 이동은 유지).
+                sx, sy = self._panel_shift
+                x, y = x - sx, y - sy
+                self._panel_shift = (0, 0)
         self.root.geometry(f"{w}x{h}+{x}+{y}")
         self._redraw_pending = False
         # 다시 그리면 버튼이 사라지거나 옮겨 간다. 손 모양 커서가 남지 않게
         # 지금 포인터 아래 항목으로 다시 맞춘다(_hovered는 위에서 None으로 비웠다).
         c.configure(cursor="")
         self._set_hover(self._btn_at())
+
+    def _clamp_to_monitor(self, x, y, w, h):
+        fallback = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        left, top, right, bottom = monitor_work_area(x + w // 2, y + 12, fallback)
+        return (max(left, min(x, right - w)), max(top, min(y, bottom - h)))
 
     def _draw_card(self, P):
         c, f = self.canvas, self.f
@@ -691,13 +785,14 @@ class Widget:
         """칩으로 보여 줄 (한도 이름, 숨길 때 저장할 문자열, id). 숨긴 것도 포함.
 
         이름("Opus 주간", "세션 (5시간)")은 언어마다 달라서 그대로 저장하면 언어를
-        바꿀 때 숨김이 풀린다. 그래서 모델별 한도는 모델명("opus")을, 모델명이 없는
-        한도는 종류 토큰("kind:session")을 저장한다.
+        바꿀 때 숨김이 풀린다. 그래서 모델별 한도는 모델명 토큰("model:opus")을,
+        모델명이 없는 한도는 종류 토큰("kind:session")을 저장한다.
         """
         seen = []
         for it in self.limits or []:
             scope = str(it["id"]).partition(":")[2].strip()
-            token = scope.lower() if scope else KIND_TOKEN + limit_kind(it["id"])
+            token = (MODEL_TOKEN + scope.lower() if scope
+                     else KIND_TOKEN + limit_kind(it["id"]))
             if all(it["label"] != s[0] for s in seen):
                 seen.append((it["label"], token, it["id"]))
         return seen
@@ -717,7 +812,10 @@ class Widget:
         elif action == "set_theme":
             d["theme"] = arg
         elif action == "set_chip":
-            label, token, item_id = self._limit_labels()[int(arg)]
+            chips = d.get("_chips") or []
+            if not arg.isdigit() or int(arg) >= len(chips):
+                return
+            label, token, item_id = chips[int(arg)]
             hits = [h for h in d["hidden_labels"] if self._hides(h, label, item_id)]
             if hits:        # 숨김 → 보임: 이 이름에 걸리는 숨김 문자열을 모두 뺀다
                 d["hidden_labels"] = [h for h in d["hidden_labels"] if h not in hits]
@@ -786,7 +884,8 @@ class Widget:
         # 표시
         y = group(i18n.t("settings.display"), y)
         ny = label(i18n.t("settings.language"), y)
-        self._segmented(x1, y + 16, [("en", "English"), ("ko", "한국어")],
+        self._segmented(x1, y + 16, [("en", i18n.t("settings.language.en")),
+                                     ("ko", i18n.t("settings.language.ko"))],
                         d["language"], "set_lang", P)
         y = ny
         ny = label(i18n.t("settings.theme"), y)
@@ -799,6 +898,7 @@ class Widget:
         # 보일 한도
         y = group(i18n.t("settings.limits"), y)
         labels = self._limit_labels()
+        d["_chips"] = labels            # 칩 번호는 이 목록 기준(_settings_action)
         if not labels:
             c.create_text(x0, y, text=i18n.t("settings.limits_empty"), anchor="nw",
                           font=f["small"], fill=P["muted"])
@@ -893,8 +993,14 @@ class Widget:
         if x is None or y is None:
             x = self.root.winfo_screenwidth() - 320
             y = 60
-        x = min(max(0, x), self.root.winfo_screenwidth() - 100)
-        y = min(max(0, y), self.root.winfo_screenheight() - 60)
+        # 저장된 자리에서 가장 가까운 모니터 기준으로, 적어도 100×60은 보이게 한다.
+        # 그 모니터가 빠졌으면 MONITOR_DEFAULTTONEAREST가 남은 모니터를 고른다.
+        # 모니터는 _clamp_to_monitor와 같은 기준점(창 위쪽 가운데)으로 고른다.
+        fallback = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+        w = self.root.winfo_reqwidth()
+        left, top, right, bottom = monitor_work_area(x + w // 2, y + 12, fallback)
+        x = min(max(left, x), right - 100)
+        y = min(max(top, y), bottom - 60)
         self.root.geometry(f"+{x}+{y}")
 
     # ── 상태줄 ──────────────────────────────────────────
@@ -909,20 +1015,22 @@ class Widget:
         return i18n.t("status.line", interval=interval, fresh=fresh)
 
     def _status_text(self):
-        """(문구, 강조 여부). 갱신 중 > 폴링 오류 > 로컬 오류 > 예약선 침범 > 평소.
+        """(문구, 강조 여부). 갱신 중 > 폴링 오류 > 예약선 침범 > 로컬 오류 > 평소.
 
         갱신 중이 오류보다 앞선다 — 오류 뒤에 새로고침을 눌렀을 때 눌린 줄 알 수 있게.
+        로컬 오류는 폴링 결과와 무관하게 LOCAL_MSG_SECS 동안 남으므로 예약선 경고를
+        가리지 않게 뒤에 둔다.
         """
         if self._refreshing:
             return i18n.t("refreshing"), False
         if self.err_key:
             return i18n.t(self.err_key), True
-        if self.local_msg:
-            return i18n.t(self.local_msg), True
         warn = self._reserve_warn()
         if warn:
             n, pct = warn
             return i18n.t("status.reserve_warn", count=n, pct=pct), True
+        if self.local_msg and time.monotonic() - self._local_msg_at < LOCAL_MSG_SECS:
+            return i18n.t(self.local_msg), True
         return self._fresh_text(), False
 
     # ── 폴링 ────────────────────────────────────────────
@@ -938,18 +1046,25 @@ class Widget:
                 autos = usage_api.count_automations()
                 self.q.put(("ok", (data, autos)))
                 backoff = 0
-                delay = self.cfg["poll_interval"]
+                mult = 1
             except usage_api.RateLimitedError as e:
                 backoff = min(backoff + 1, 3)
-                delay = self.cfg["poll_interval"] * (2 ** backoff)
+                mult = 2 ** backoff
                 self.q.put(("err", e))
             except usage_api.UsageError as e:
-                delay = self.cfg["poll_interval"]
+                mult = 1
                 self.q.put(("err", e))
             except Exception as e:  # 최종 안전망 — 폴링 스레드가 죽으면 위젯이
-                delay = self.cfg["poll_interval"]  # 낡은 값에서 영구히 멈춘다
+                mult = 1            # 낡은 값에서 영구히 멈춘다
                 self.q.put(("err", e))
-            self._refresh_now.wait(timeout=delay)
+            # 대기 시간을 5초마다 cfg에서 다시 계산한다. 설정 패널에서 간격을 바꾸면
+            # 이번 대기에도 바로 반영된다(60분 → 3분이면 3분이 지난 시점에 받는다).
+            # 바로 받지는 않는다 — 저장할 때마다 요청하면 429가 날 수 있다.
+            start = time.monotonic()
+            while not self._stop.is_set():
+                left = self.cfg["poll_interval"] * mult - (time.monotonic() - start)
+                if left <= 0 or self._refresh_now.wait(timeout=min(left, 5)):
+                    break
 
     def _drain_queue(self):
         try:
@@ -964,14 +1079,13 @@ class Widget:
                     self.automations = autos
                     self.limits = data
                     self.err_key = None
-                    self.local_msg = None
                     self._record_history(data)
                 else:
                     self.err_key = ERROR_KEYS.get(type(payload), UNEXPECTED_ERROR_KEY)
         except queue.Empty:
             pass
         if changed:
-            if self._sx is None:
+            if not self._dragging():
                 self._redraw()
             else:
                 # 드래그 중에 창 크기·위치를 다시 박으면 끌기가 튄다(_tick과 같은 이유).
@@ -982,7 +1096,7 @@ class Widget:
     def _tick(self):
         # 분 단위 카운트다운·시간 칸·"N분 전 갱신"을 따라가게 다시 그린다.
         # 드래그 중에는 건너뛴다(창 크기를 다시 박으면 끌기가 튄다).
-        if self._sx is None:
+        if not self._dragging():
             self._redraw()
         self.root.after(30_000, self._tick)
 
@@ -1032,13 +1146,37 @@ class Widget:
         self._save_config()
 
     # ── 드래그/버튼 ─────────────────────────────────────
+    def _drop_press(self):
+        self._sx = self._sy = None
+        self._pressed = None
+        if self._redraw_pending:
+            # 놓친 ButtonRelease는 _release에 오지 않는다 — 미뤄 둔 다시 그리기를
+            # 여기서 건다(안 그러면 다음 _tick까지 최대 30초 늦는다).
+            self.root.after_idle(lambda: self._stop.is_set() or self._redraw())
+
+    def _dragging(self):
+        """눌린 채 끄는 중인지. ButtonRelease를 놓쳤으면(메뉴·Alt+Tab·Win+D)
+        _sx가 남아 있어도 버튼은 떼어져 있다 — 그때는 누른 상태를 버린다.
+        안 그러면 다시 그리기가 영영 미뤄져 새 값이 화면에 안 나온다.
+
+        버튼 상태 API는 원격 데스크톱 등에서 눌린 버튼을 떼어진 것으로 알려 줄 수
+        있다. 그래서 마지막 누름·끌기 뒤 1초가 지났을 때만 버린다."""
+        if self._sx is None:
+            return False
+        if not left_button_down() and time.monotonic() - self._last_motion > 1.0:
+            self._drop_press()
+            return False
+        return True
+
     def _press(self, e):
         self._pressed = self._btn_at()
         self._sx, self._sy = e.x_root, e.y_root
+        self._last_motion = time.monotonic()
         self._drag_ox = e.x_root - self.root.winfo_x()
         self._drag_oy = e.y_root - self.root.winfo_y()
 
     def _drag_move(self, e):
+        self._last_motion = time.monotonic()
         if self._sx is None or self._pressed:
             return              # 버튼 위에서 시작한 끌기는 창을 옮기지 않는다
         self.root.geometry(f"+{e.x_root - self._drag_ox}+{e.y_root - self._drag_oy}")
@@ -1053,6 +1191,8 @@ class Widget:
             if not moved and pressed == self._btn_at():
                 self._invoke(pressed, e)
         elif moved:
+            if self._redraw_pending:
+                self._redraw()       # 위치를 저장하기 전에 — 다시 그리기가 창을 옮길 수 있다
             self._save_config()
         elif self._draft is not None:
             pass                     # 설정 패널의 빈 곳 클릭 — 알약 상태에서 열었어도 접지 않는다
@@ -1076,7 +1216,10 @@ class Widget:
             self._settings_action(name)
 
     def _save_config(self):
-        self.cfg["x"], self.cfg["y"] = self.root.winfo_x(), self.root.winfo_y()
+        # 설정 패널을 화면 안으로 당긴 만큼은 빼고 저장한다. 그 이동은 패널을 닫으면
+        # 되돌리는 임시 이동이라, 다음 실행의 카드 위치가 되면 안 된다.
+        sx, sy = self._panel_shift
+        self.cfg["x"], self.cfg["y"] = self.root.winfo_x() - sx, self.root.winfo_y() - sy
         self.cfg["topmost"] = self.topmost_var.get()
         self.cfg["minimized"] = self.minimized
         try:
@@ -1109,6 +1252,7 @@ class Widget:
             # err_key가 아니라 local_msg — err_key는 '값이 낡았다'는 뜻이라
             # 카드를 흐리게 하고 위험 표시를 끈다(_stale).
             self.local_msg = "status.autostart_failed"
+            self._local_msg_at = time.monotonic()
             self._redraw()
             return
         self.local_msg = None
