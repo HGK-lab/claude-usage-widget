@@ -7,5 +7,6 @@
   "automation_reserve_pct": 5,
   "language": "en",
   "hidden_labels": [],
-  "auto_refresh_token": true
+  "auto_refresh_token": true,
+  "theme": "light"
 }

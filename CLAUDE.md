@@ -13,7 +13,7 @@ Windows 전용인 이유는 세 가지다: Tk의 `-transparentcolor` 속성, `ms
 
 ```bash
 # 문법 검사
-python -m py_compile main.py usage_api.py i18n.py
+python -m py_compile main.py usage_api.py i18n.py theme.py
 
 # API 호출·파싱 단독 테스트 (위젯 없이 실측값 출력). 인자로 언어 코드 지정 가능
 PYTHONIOENCODING=utf-8 python usage_api.py
@@ -37,13 +37,16 @@ run_widget.bat
 - **`usage_api.py`** — 데이터 계층. `~/.claude/.credentials.json`에서 OAuth 토큰을 읽어 `GET https://api.anthropic.com/api/oauth/usage`를 호출하고, 응답을 `[{"id", "label", "used_pct", "resets_at"}]` 리스트로 정규화. 오류는 구분된 예외(`TokenMissingError`/`TokenExpiredError`/`RateLimitedError`/`NetworkError`/`ParseError`)로 던진다.
 - **`main.py`** — UI 계층. 무테두리 tkinter 위젯 + 폴링. API 호출은 백그라운드 스레드에서, UI 갱신은 `queue` → `root.after()` 경유로 **메인 스레드에서만**. 설정(창 위치 등)은 `config.json`에 자동 저장.
 
-여기에 leaf 모듈이 하나 붙는다:
+여기에 leaf 모듈이 둘 붙는다:
 
 - **`i18n.py`** — 문자열 테이블(EN/KO). 두 계층 모두 import 하지만 **자신은 어느 쪽도 import 하지 않는다**. 이 방향을 뒤집으면 계층 경계가 깨진다.
   - 새 UI 문자열은 하드코딩하지 말고 EN·KO 양쪽에 키를 추가한다.
   - **문자열이 아니라 키를 들고 다닐 것.** 모듈 로드 시점에 문자열로 굳히면 `language` 설정이 안 먹는다 (`main.py`의 `ERROR_KEYS`, `usage_api.py`의 `KIND_KEYS`/`LEGACY_KEYS`가 그래서 키 매핑이다).
   - `i18n.t()`는 절대 던지지 않는다 — 없는 키는 키 자체를, 포맷 실패는 원본 템플릿을 돌려준다.
   - 언어는 `load_config()`가 딱 한 번 적용한다(`i18n.set_language`). 설정을 읽는 유일한 지점이라 UI 생성 전 호출 순서가 보장된다.
+- **`theme.py`** — 색·글꼴·치수 토큰. `main.py`만 import 하고, 자신은 아무것도 import 하지 않는다. 기준 문서는 루트의 `DESIGN.md`이고 두 곳이 어긋나면 `DESIGN.md`가 맞다.
+  - 색은 전부 hex로 미리 계산해 둔다(tkinter에 투명도·color-mix·그림자 없음). `theme.KEY`(투명 키)와 같은 색을 팔레트에 넣지 말 것.
+  - UI는 카드 전체를 `Canvas` 하나에 매번 다시 그린다(`Widget._redraw`). 위젯을 부분 갱신하는 코드를 따로 만들지 말고 상태를 바꾼 뒤 `_redraw()`를 부른다.
 
 ### 예외 계약
 
@@ -81,6 +84,7 @@ run_widget.bat
 | `language` | `"en"` | `"en"` 또는 `"ko"`. 모르는 값은 조용히 영어 |
 | `hidden_labels` | `[]` | 이 문자열이 라벨에 들어간 행을 숨김 (부분일치·대소문자 무시). 리스트가 아니면 `[]` |
 | `auto_refresh_token` | `true` | 401 시 credentials 파일에 재발급 토큰을 쓸지 여부 |
+| `theme` | `"light"` | `"light"` 또는 `"dark"`. 모르는 값은 밝은 테마 |
 
 `load_config()`는 손으로 고친 값 때문에 위젯이 안 뜨는 일이 없도록 전부 강제 변환·클램프한다 (불변조건 5).
 

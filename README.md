@@ -68,13 +68,24 @@ Never delete it to "fix" anything.
 | Action | What it does |
 |---|---|
 | Drag anywhere on the card | Move it. The position is saved. |
-| **—** | Shrink to a small pill badge showing the session percentage. Click the pill to restore. |
+| **≡** | Open the menu (same as right-click) |
+| **—** | Shrink to a small pill badge showing the session and weekly percentages. Click the pill to restore. |
 | **⟳** | Refresh now |
 | **✕** | Quit |
-| Right-click | Refresh · Minimize/restore · Always on top · Run at startup · Quit |
+| Right-click | Refresh · Minimize/restore · Always on top · Run at startup · Dark theme · Quit |
 
-Bar colors follow how much you have used: under 70% is neutral ink, 70–90% amber,
-90% and above deep red.
+**Reading a row.** The blocks are *time*: one per hour for the 5-hour session, one per
+day for the week. Blocks fill in as time passes and the outlined block is now. The thin
+bar over them is *usage*. If the bar runs ahead of the filled blocks, you are spending
+faster than the window is passing.
+
+- 70% and above: an "over 70%" tag appears and the bar turns a deeper clay.
+- 90% and above, or past the automation line: the whole card flips (dark card in the
+  light theme, light card in the dark theme).
+- The weekly row shows a daily budget: what is left, split over the days left.
+- If a refresh fails, the last values stay on the card, dimmed, with how old they are.
+
+The colors are Claude's clay, ivory and slate. Switch to the dark theme from the menu.
 
 ### Run at startup
 
@@ -85,14 +96,15 @@ breaking — if you edit it, keep the encoding and the `chcp` line in sync.
 ### Automation headroom
 
 If you have scheduled tasks in `~/.claude/scheduled-tasks/`, the widget draws a red limit
-line on the session bar so you can see whether you are about to spend the room those tasks
+line across the session blocks so you can see whether you are about to spend the room those tasks
 will need.
 
 - Reserved = (number of automations) × `automation_reserve_pct` (default 5% each, capped
   at 80%).
 - The line sits at `100 − reserved`%. Add or remove an automation and the line moves on
   the next refresh.
-- Cross it and the session percentage turns red with a warning in the status line.
+- Cross it and the session row is tagged "into reserve", the card flips, and the status
+  line says how much you are into the reserve.
 
 ## Configuration
 
@@ -110,13 +122,15 @@ stopping the widget from opening.
 | `language` | `"en"` | `"en"` or `"ko"`. Anything else silently falls back to English. |
 | `hidden_labels` | `[]` | Hide any row whose label contains one of these strings (case-insensitive). E.g. `["fable"]`. |
 | `auto_refresh_token` | `true` | Whether to refresh the OAuth token — and write `~/.claude/.credentials.json` — when it expires |
+| `theme` | `"light"` | `"light"` or `"dark"`. Anything else falls back to light. |
 
 ## How it works
 
 `usage_api.py` reads the OAuth token, calls
 `GET https://api.anthropic.com/api/oauth/usage`, and normalizes the response into a plain
 list of limits. `main.py` polls it on a background thread and pushes results to the tkinter
-main thread through a queue. `i18n.py` holds the English and Korean strings.
+main thread through a queue. `i18n.py` holds the English and Korean strings, and
+`theme.py` the colors, fonts and sizes (see `DESIGN.md`).
 
 A few details worth knowing:
 
@@ -152,7 +166,7 @@ it before changing anything in the token or locking paths. It and the subagent d
 in `.claude/agents/` are written in Korean.
 
 There is no test framework. Verification means running
-`python -m py_compile main.py usage_api.py i18n.py`, then
+`python -m py_compile main.py usage_api.py i18n.py theme.py`, then
 `python usage_api.py` to print live values, then opening the widget and comparing against
 `/usage`.
 
